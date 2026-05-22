@@ -1,0 +1,32 @@
+[package]
+name = "supertools"
+version = "0.1.0"
+description = "Lightweight productivity toolbox"
+authors = ["OpenAI Codex"]
+license = ""
+repository = ""
+edition = "2021"
+rust-version = "1.81"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+futures-util = "0.3"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+num_cpus = "1.17"
+open = "5"
+parking_lot = "0.12"
+resvg = "0.47"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-shell = "2"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "process", "rt-multi-thread", "sync", "time"] }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
