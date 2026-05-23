@@ -1,7 +1,10 @@
 use crate::{
     app_state::{AppState, JobControl},
     compress::{run_job, scan_inputs, CompressJobRequest, InputSource, ScanResult},
-    svg::{export_svg_image_file, SvgExportRequest, SvgExportResult},
+    svg::{
+        export_svg_icon_set as export_svg_icon_set_impl, export_svg_image_file, SvgExportRequest,
+        SvgExportResult, SvgIconSetRequest, SvgIconSetResult,
+    },
 };
 use std::sync::Arc;
 use tauri::{AppHandle, State};
@@ -59,4 +62,9 @@ pub fn open_path(path: String) -> Result<(), String> {
 #[tauri::command]
 pub fn export_svg_image(request: SvgExportRequest) -> Result<SvgExportResult, String> {
     export_svg_image_file(request)
+}
+
+#[tauri::command]
+pub fn export_svg_icon_set(request: SvgIconSetRequest) -> Result<SvgIconSetResult, String> {
+    export_svg_icon_set_impl(request)
 }

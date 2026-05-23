@@ -6,6 +6,8 @@ import type {
   ScanResult,
   SvgExportRequest,
   SvgExportResult,
+  SvgIconSetRequest,
+  SvgIconSetResult,
 } from './types'
 
 declare global {
@@ -36,4 +38,8 @@ export async function openPath(path: string) {
 
 export async function exportSvgImage(request: SvgExportRequest) {
   return invoke<SvgExportResult>('export_svg_image', { request })
+}
+
+export async function exportSvgIconSet(request: SvgIconSetRequest) {
+  return invoke<SvgIconSetResult>('export_svg_icon_set', { request })
 }

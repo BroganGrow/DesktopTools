@@ -251,25 +251,25 @@ function App() {
         <main className="workspace-panel shell-panel">
           {activeMeta ? (
             <>
-              <header className="workspace-header">
-                <div>
-                  <button
-                    className="back-link"
-                    onClick={() => setActiveTool(null)}
-                    type="button"
-                  >
-                    返回工具目录
-                  </button>
-                  <p className="eyebrow">Workspace</p>
-                  <h2>{activeMeta.name}</h2>
-                  <p>{activeMeta.description}</p>
-                </div>
-
-                <div className="workspace-badges">
-                  <span>{activeMeta.scopeLabel}</span>
-                  <span>{activeMeta.engineLabel}</span>
-                  <span>{activeMeta.statusLabel}</span>
-                </div>
+              <header className="workspace-header workspace-header-compact">
+                <button
+                  aria-label="返回工具目录"
+                  className="back-link"
+                  onClick={() => setActiveTool(null)}
+                  type="button"
+                >
+                  <svg aria-hidden="true" className="back-link-icon" viewBox="0 0 20 20">
+                    <path
+                      d="M11.75 4.5 6.25 10l5.5 5.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="1.9"
+                    />
+                  </svg>
+                </button>
+                <h2>{activeMeta.name}</h2>
               </header>
 
               <div className="workspace-body">

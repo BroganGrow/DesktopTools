@@ -1,5 +1,6 @@
 export type OutputFormat = 'webp' | 'png' | 'avif'
 export type SvgExportFormat = 'png' | 'jpg' | 'jpeg'
+export type IconPlatform = 'android' | 'ios' | 'flutter' | 'electron' | 'tauri'
 
 export type CompressionPreset = 'balanced' | 'quality' | 'size'
 
@@ -90,6 +91,7 @@ export type SvgExportRequest = {
   quality: number
   keepAspectRatio: boolean
   background: string
+  paddingPercent: number
   outputPath: string
 }
 
@@ -100,4 +102,29 @@ export type SvgExportResult = {
   height: number
   format: SvgExportFormat
   outputBytes: number
+}
+
+export type SvgIconSetRequest = {
+  svgCode: string
+  outputDir: string
+  appName: string
+  platforms: IconPlatform[]
+  background: string
+  paddingPercent: number
+}
+
+export type IconAssetResult = {
+  platform: IconPlatform
+  outputPath: string
+  width: number
+  height: number
+  outputBytes: number
+}
+
+export type SvgIconSetResult = {
+  outputDir: string
+  generatedCount: number
+  totalBytes: number
+  platforms: IconPlatform[]
+  assets: IconAssetResult[]
 }

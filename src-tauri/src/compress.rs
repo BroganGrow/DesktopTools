@@ -1,7 +1,4 @@
-use crate::{
-    app_state::JobControl,
-    png::inspect_png,
-};
+use crate::{app_state::JobControl, png::inspect_png};
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -227,15 +224,7 @@ pub async fn run_job(
     }
 
     let total = scan.supported_count;
-    emit_progress(
-        &app,
-        &control.id,
-        None,
-        0,
-        total,
-        0,
-        ProgressState::Queued,
-    )?;
+    emit_progress(&app, &control.id, None, 0, total, 0, ProgressState::Queued)?;
 
     let job_started = Instant::now();
     let limit = num_cpus::get_physical().max(1).min(4);
@@ -249,12 +238,22 @@ pub async fn run_job(
         let input = request.input.clone();
         let control = Arc::clone(&control);
         pending.push(tokio::spawn(async move {
-            let _permit = permit.acquire_owned().await.map_err(|error| error.to_string())?;
+            let _permit = permit
+                .acquire_owned()
+                .await
+                .map_err(|error| error.to_string())?;
             if control.is_cancelled() {
                 return Ok(build_cancelled_result(candidate.path, candidate.bytes));
             }
 
-            compress_single(&app_handle, &input, candidate.path, candidate.bytes, &options).await
+            compress_single(
+                &app_handle,
+                &input,
+                candidate.path,
+                candidate.bytes,
+                &options,
+            )
+            .await
         }));
     }
 
@@ -374,7 +373,8 @@ async fn compress_single(
         ConflictPolicy::Replace => {
             if output_path.exists() {
                 replaced_existing = true;
-                fs::remove_file(&output_path).map_err(|error| format!("覆盖旧文件失败: {error}"))?;
+                fs::remove_file(&output_path)
+                    .map_err(|error| format!("覆盖旧文件失败: {error}"))?;
             }
         }
         ConflictPolicy::Skip if output_path.exists() => {
@@ -504,11 +504,7 @@ fn preset_args(options: &CompressionOptions) -> Vec<String> {
     args
 }
 
-fn build_output_path(
-    input: &InputSource,
-    source: &Path,
-    suffix: &str,
-) -> Result<PathBuf, String> {
+fn build_output_path(input: &InputSource, source: &Path, suffix: &str) -> Result<PathBuf, String> {
     let stem = source
         .file_stem()
         .and_then(|value| value.to_str())
@@ -527,7 +523,9 @@ fn build_output_path(
                 .and_then(|value| value.to_str())
                 .ok_or_else(|| "无法解析文件夹名".to_string())?;
 
-            Ok(parent.join(format!("{folder_name}_compressed")).join(file_name))
+            Ok(parent
+                .join(format!("{folder_name}_compressed"))
+                .join(file_name))
         }
         InputSource::Files { .. } => {
             let parent = source
@@ -582,7 +580,10 @@ fn uniquify_output_path(path: PathBuf) -> PathBuf {
         .file_stem()
         .and_then(|value| value.to_str())
         .unwrap_or("output");
-    let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("webp");
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("webp");
     let parent = path.parent().map(PathBuf::from).unwrap_or_default();
 
     for index in 1..=999 {

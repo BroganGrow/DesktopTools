@@ -21,10 +21,12 @@ fn main() {
             commands::start_compress_job,
             commands::cancel_compress_job,
             commands::open_path,
-            commands::export_svg_image
+            commands::export_svg_image,
+            commands::export_svg_icon_set
         ])
         .setup(|app| {
             let main_window = app.get_webview_window("main").expect("main window");
+            let _ = main_window.center();
             main_window.show()?;
             Ok(())
         })

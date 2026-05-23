@@ -16,6 +16,7 @@
         "title": "SuperTools",
         "width": 1440,
         "height": 960,
+        "center": true,
         "minWidth": 1160,
         "minHeight": 760,
         "resizable": true,
