@@ -1,0 +1,18 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="grad-43" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#34e0a1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#21bd87;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <path fill="url(#grad-43)" d="M 512,0 C 140,0 0,140 0,512 C 0,884 140,1024 512,1024 C 884,1024 1024,884 1024,512 C 1024,140 884,0 512,0 Z" />
+  <rect x="272" y="272" width="128" height="128" rx="32" fill="white" opacity="0.95"/>
+  <rect x="448" y="272" width="128" height="128" rx="32" fill="white" opacity="0.95"/>
+  <rect x="624" y="272" width="128" height="128" rx="32" fill="white" opacity="0.95"/>
+  <rect x="272" y="448" width="128" height="128" rx="32" fill="white" opacity="0.95"/>
+  <rect x="448" y="448" width="128" height="128" rx="32" fill="white" opacity="0.4"/>
+  <rect x="624" y="448" width="128" height="128" rx="32" fill="white" opacity="0.95"/>
+  <rect x="272" y="624" width="128" height="128" rx="32" fill="white" opacity="0.95"/>
+  <rect x="448" y="624" width="128" height="128" rx="32" fill="white" opacity="0.95"/>
+  <rect x="624" y="624" width="128" height="128" rx="32" fill="white" opacity="0.95"/>
+</svg>

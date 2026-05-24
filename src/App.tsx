@@ -128,7 +128,9 @@ function App() {
       <header className="top-menubar">
         <div className="menubar-left">
           <div className="title-cluster" data-tauri-drag-region>
-            <div className="title-mark">ST</div>
+            <div className="title-mark">
+              <img alt="SuperTools Logo" className="title-mark-image" src="/logo-mark.png" />
+            </div>
             <span className="title-name">SuperTools</span>
           </div>
 

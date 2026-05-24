@@ -163,17 +163,22 @@ button {
 }
 
 .title-mark {
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 26px;
   height: 26px;
   border-radius: 8px;
-  background: linear-gradient(145deg, var(--accent), var(--accent-2));
-  color: #101318;
-  color: var(--accent-contrast);
-  font-weight: 800;
-  font-size: 11px;
-  letter-spacing: 0.06em;
+  overflow: hidden;
+  background: transparent;
+}
+
+.title-mark-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  display: block;
 }
 
 .title-name {
