@@ -35,7 +35,9 @@
     ],
     "targets": "all",
     "externalBin": [
-      "binaries/cwebp"
+      "binaries/cwebp",
+      "binaries/avifenc",
+      "binaries/mutool"
     ]
   }
 }

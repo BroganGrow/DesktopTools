@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { PdfTool } from './components/PdfTool'
 import { PngCompressTool } from './components/PngCompressTool'
 import { SvgExportTool } from './components/SvgExportTool'
 import { isTauriRuntime } from './lib/tauri'
@@ -9,6 +10,7 @@ import { toolRegistry, type ToolId, type ToolMeta } from './tool-registry'
 const categoryLabels: Record<string, string> = {
   favorite: '常用工具',
   image: '图像处理',
+  pdf: 'PDF 工具',
   vector: '开发辅助',
   upcoming: '系统增强',
 }
@@ -20,6 +22,7 @@ type ToolCategory = keyof typeof categoryLabels
 const categoryIcons: Record<ToolCategory, string> = {
   favorite: '★',
   image: 'IMG',
+  pdf: 'PDF',
   vector: 'DEV',
   upcoming: 'SYS',
 }
@@ -277,6 +280,7 @@ function App() {
               <div className="workspace-body">
                 {activeTool === 'png-compress' ? <PngCompressTool /> : null}
                 {activeTool === 'svg-export' ? <SvgExportTool /> : null}
+                {activeMeta.category === 'pdf' ? <PdfTool activeTool={activeMeta.id} /> : null}
               </div>
             </>
           ) : (

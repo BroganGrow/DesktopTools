@@ -1,10 +1,12 @@
 import { open } from '@tauri-apps/plugin-dialog'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { listen } from '@tauri-apps/api/event'
 import { useEffect, useMemo, useState } from 'react'
 import {
   cancelCompressJob,
   isTauriRuntime,
   openPath,
+  resolveDroppedInput,
   scanPngInputs,
   startCompressJob,
 } from '../lib/tauri'
@@ -14,8 +16,8 @@ import type {
   CompressionOptions,
   CompressionPreset,
   CompressProgressEvent,
-  ConflictPolicy,
   InputSource,
+  OutputFormat,
   ScanResult,
 } from '../lib/types'
 import { formatBytes, formatDuration, getErrorMessage } from '../lib/format'
@@ -26,24 +28,18 @@ const presetCopy: Record<CompressionPreset, string> = {
   size: '更小体积',
 }
 
-const conflictCopy: Record<ConflictPolicy, string> = {
-  replace: '覆盖已生成文件',
-  skip: '跳过已存在文件',
-  rename: '自动改名',
-}
-
 const defaultOptions: CompressionOptions = {
   outputFormat: 'webp',
   preset: 'balanced',
   stripMetadata: true,
   keepTransparentRgb: true,
+  skipLargerOutput: true,
   conflictPolicy: 'replace',
   outputSuffix: '_compressed',
   recursive: false,
 }
 
 export function PngCompressTool() {
-  const [selectionMode, setSelectionMode] = useState<'files' | 'folder'>('files')
   const [inputSource, setInputSource] = useState<InputSource | null>(null)
   const [scanResult, setScanResult] = useState<ScanResult | null>(null)
   const [options, setOptions] = useState<CompressionOptions>(defaultOptions)
@@ -51,6 +47,7 @@ export function PngCompressTool() {
   const [jobResult, setJobResult] = useState<CompressJobResult | null>(null)
   const [progressEvent, setProgressEvent] = useState<CompressProgressEvent | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [dragOver, setDragOver] = useState(false)
   const runtimeReady = isTauriRuntime()
 
   useEffect(() => {
@@ -67,6 +64,44 @@ export function PngCompressTool() {
 
     return () => {
       unlisten?.()
+    }
+  }, [runtimeReady])
+
+  useEffect(() => {
+    if (!runtimeReady) {
+      return
+    }
+
+    let unlistenDrag: (() => void) | undefined
+    void getCurrentWindow()
+      .onDragDropEvent(async (event) => {
+        if (event.payload.type === 'enter') {
+          setDragOver(true)
+          return
+        }
+
+        if (event.payload.type === 'leave') {
+          setDragOver(false)
+          return
+        }
+
+        if (event.payload.type === 'drop') {
+          setDragOver(false)
+          setError(null)
+          try {
+            const source = await resolveDroppedInput(event.payload.paths)
+            await refreshScan(source)
+          } catch (dropError) {
+            setError(getErrorMessage(dropError))
+          }
+        }
+      })
+      .then((dispose) => {
+        unlistenDrag = dispose
+      })
+
+    return () => {
+      unlistenDrag?.()
     }
   }, [runtimeReady])
 
@@ -95,7 +130,6 @@ export function PngCompressTool() {
       return
     }
 
-    setSelectionMode('files')
     await refreshScan({ kind: 'files', paths: result })
   }
 
@@ -116,8 +150,7 @@ export function PngCompressTool() {
       return
     }
 
-    setSelectionMode('folder')
-    await refreshScan({ kind: 'folder', path: result })
+    await refreshScan({ kind: 'folder', path: result, recursive: options.recursive })
   }
 
   async function refreshScan(source: InputSource) {
@@ -133,6 +166,13 @@ export function PngCompressTool() {
       }
     } catch (scanError) {
       setError(getErrorMessage(scanError))
+    }
+  }
+
+  async function handleToggleRecursive(enabled: boolean) {
+    setOptions((current) => ({ ...current, recursive: enabled }))
+    if (inputSource?.kind === 'folder') {
+      await refreshScan({ ...inputSource, recursive: enabled })
     }
   }
 
@@ -174,68 +214,41 @@ export function PngCompressTool() {
     }
   }
 
-  const summaryBlocks = [
-    { label: '待处理', value: scanResult?.supportedCount ?? 0, hint: '已通过校验的 PNG' },
-    { label: '跳过', value: scanResult?.skipped.length ?? 0, hint: '非 PNG / APNG / 损坏文件' },
-    { label: '原始体积', value: formatBytes(scanResult?.totalBytes ?? 0), hint: selectedSummary },
-  ]
-
   return (
     <div className="tool-stage">
-      <section className="module-banner accent-image">
-        <div>
-          <p className="eyebrow">PNG Compression</p>
-          <h3>批量压缩，不碰原图</h3>
-          <p>更适合高频生产使用的批处理型模块，输出目录和冲突策略都明确可控。</p>
-        </div>
-        <div className="module-banner-meta">
-          <span>批量</span>
-          <span>事件进度</span>
-          <span>cwebp</span>
-        </div>
-      </section>
-
       <section className="module-card">
         <div className="section-top">
           <div>
-            <h4>输入源</h4>
-            <p>支持多选文件，或选择一个只扫描当前层级的文件夹。</p>
-          </div>
-          <div className="segmented">
-            <button className={selectionMode === 'files' ? 'active' : ''} onClick={() => setSelectionMode('files')} type="button">
-              多文件
-            </button>
-            <button className={selectionMode === 'folder' ? 'active' : ''} onClick={() => setSelectionMode('folder')} type="button">
-              文件夹
-            </button>
+            <h4>快速设置</h4>
+            <p>{selectedSummary}</p>
           </div>
         </div>
+        {dragOver ? <p className="drop-hint">松开鼠标以导入：单文件 / 多文件 / 单个文件夹</p> : null}
 
-        <div className="action-row">
-          <button className="secondary" onClick={handleSelectFiles} type="button">选择 PNG 文件</button>
+        <div className="action-row png-action-grid">
+          <button className="secondary" onClick={handleSelectFiles} type="button">选择文件（单个/多个）</button>
           <button className="secondary" onClick={handleSelectFolder} type="button">选择文件夹</button>
+          <button className="primary" disabled={isBusy || !scanResult || scanResult.supportedCount === 0} onClick={handleStart} type="button">
+            {isBusy ? '压缩中…' : '开始压缩'}
+          </button>
+          <button className="ghost" disabled={!isBusy || !progressEvent?.jobId} onClick={handleCancel} type="button">取消任务</button>
         </div>
 
-        <div className="dashboard-grid">
-          {summaryBlocks.map((item) => (
-            <article className="metric-box" key={item.label}>
-              <span>{item.label}</span>
-              <strong>{item.value}</strong>
-              <small>{item.hint}</small>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="module-card">
-        <div className="section-top">
-          <div>
-            <h4>压缩参数</h4>
-            <p>主参数保持简洁，避免把常用模块做成一张密密麻麻的专业面板。</p>
-          </div>
-        </div>
-
-        <div className="form-grid">
+        <div className="form-grid png-quick-grid">
+          <label>
+            <span>导出格式</span>
+            <select
+              value={options.outputFormat}
+              onChange={(event) =>
+                setOptions((current) => ({ ...current, outputFormat: event.target.value as OutputFormat }))
+              }
+            >
+              <option value="webp">WebP（推荐）</option>
+              <option value="avif">AVIF（更小体积）</option>
+              <option value="png">PNG</option>
+              <option value="jpeg">JPG / JPEG</option>
+            </select>
+          </label>
           <label>
             <span>预设</span>
             <select value={options.preset} onChange={(event) => setOptions((current) => ({ ...current, preset: event.target.value as CompressionPreset }))}>
@@ -247,30 +260,36 @@ export function PngCompressTool() {
             <input type="number" min={1} max={100} placeholder="留空使用预设" value={options.quality ?? ''} onChange={(event) => setOptions((current) => ({ ...current, quality: event.target.value ? Number(event.target.value) : undefined }))} />
           </label>
           <label>
-            <span>冲突策略</span>
-            <select value={options.conflictPolicy} onChange={(event) => setOptions((current) => ({ ...current, conflictPolicy: event.target.value as ConflictPolicy }))}>
-              {Object.entries(conflictCopy).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
+            <span>待处理</span>
+            <input readOnly value={String(scanResult?.supportedCount ?? 0)} />
           </label>
           <label>
-            <span>文件后缀</span>
-            <input type="text" value={options.outputSuffix} onChange={(event) => setOptions((current) => ({ ...current, outputSuffix: event.target.value || '_compressed' }))} />
+            <span>原始体积</span>
+            <input readOnly value={formatBytes(scanResult?.totalBytes ?? 0)} />
           </label>
         </div>
 
-        <div className="toggle-grid">
+        <div className="toggle-grid png-toggle-grid">
           <label className="toggle-panel">
-            <input checked={options.stripMetadata} onChange={(event) => setOptions((current) => ({ ...current, stripMetadata: event.target.checked }))} type="checkbox" />
+            <input
+              checked={options.recursive}
+              onChange={(event) => void handleToggleRecursive(event.target.checked)}
+              type="checkbox"
+            />
             <div>
-              <strong>移除元数据</strong>
-              <p>默认开启，优先换取体积收益。</p>
+              <strong>递归扫描子目录</strong>
+              <p>只在文件夹模式生效。</p>
             </div>
           </label>
           <label className="toggle-panel">
-            <input checked={options.keepTransparentRgb} onChange={(event) => setOptions((current) => ({ ...current, keepTransparentRgb: event.target.checked }))} type="checkbox" />
+            <input
+              checked={options.skipLargerOutput}
+              onChange={(event) => setOptions((current) => ({ ...current, skipLargerOutput: event.target.checked }))}
+              type="checkbox"
+            />
             <div>
-              <strong>保留透明区 RGB</strong>
-              <p>减少透明边缘出现脏边。</p>
+              <strong>只保留更小结果</strong>
+              <p>默认开启。</p>
             </div>
           </label>
         </div>
@@ -280,13 +299,7 @@ export function PngCompressTool() {
         <div className="section-top">
           <div>
             <h4>执行与结果</h4>
-            <p>保持单文件失败不阻断整批流程，输出结果聚焦体积和错误原因。</p>
-          </div>
-          <div className="action-row">
-            <button className="primary" disabled={isBusy || !scanResult || scanResult.supportedCount === 0} onClick={handleStart} type="button">
-              {isBusy ? '压缩中…' : '开始压缩'}
-            </button>
-            <button className="ghost" disabled={!isBusy || !progressEvent?.jobId} onClick={handleCancel} type="button">取消任务</button>
+            <p>聚焦进度、节省体积和错误原因。</p>
           </div>
         </div>
 

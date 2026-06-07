@@ -1,12 +1,20 @@
 use crate::{app_state::JobControl, png::inspect_png};
 use futures_util::{stream::FuturesUnordered, StreamExt};
+use image::{
+    codecs::{
+        jpeg::JpegEncoder,
+        png::{CompressionType as PngCompressionType, FilterType as PngFilterType, PngEncoder},
+    },
+    ColorType, DynamicImage, GenericImageView, ImageEncoder,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
     fs,
+    io::BufWriter,
     path::{Path, PathBuf},
     sync::Arc,
-    time::Instant,
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_shell::ShellExt;
@@ -15,8 +23,14 @@ use tokio::sync::Semaphore;
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum InputSource {
-    Files { paths: Vec<String> },
-    Folder { path: String },
+    Files {
+        paths: Vec<String>,
+    },
+    Folder {
+        path: String,
+        #[serde(default)]
+        recursive: bool,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -24,6 +38,7 @@ pub enum InputSource {
 pub enum OutputFormat {
     Webp,
     Png,
+    Jpeg,
     Avif,
 }
 
@@ -51,6 +66,7 @@ pub struct CompressionOptions {
     pub quality: Option<u8>,
     pub strip_metadata: bool,
     pub keep_transparent_rgb: bool,
+    pub skip_larger_output: bool,
     pub conflict_policy: ConflictPolicy,
     pub output_suffix: String,
     pub recursive: bool,
@@ -214,10 +230,6 @@ pub async fn run_job(
     request: CompressJobRequest,
     control: Arc<JobControl>,
 ) -> Result<CompressJobResult, String> {
-    if request.options.output_format != OutputFormat::Webp {
-        return Err("v1 仅支持输出 WebP。".to_string());
-    }
-
     let scan = scan_inputs(&request.input)?;
     if scan.supported_count == 0 {
         return Err("没有可处理的 PNG 文件。".to_string());
@@ -361,7 +373,12 @@ async fn compress_single(
 ) -> Result<CompressItemResult, String> {
     let started = Instant::now();
     let source = PathBuf::from(&source_path);
-    let output_path = build_output_path(input, &source, &options.output_suffix)?;
+    let output_path = build_output_path(
+        input,
+        &source,
+        &options.output_suffix,
+        &options.output_format,
+    )?;
     let output_dir = output_path
         .parent()
         .ok_or_else(|| "无法确定输出目录".to_string())?;
@@ -373,8 +390,6 @@ async fn compress_single(
         ConflictPolicy::Replace => {
             if output_path.exists() {
                 replaced_existing = true;
-                fs::remove_file(&output_path)
-                    .map_err(|error| format!("覆盖旧文件失败: {error}"))?;
             }
         }
         ConflictPolicy::Skip if output_path.exists() => {
@@ -399,24 +414,28 @@ async fn compress_single(
         output_path
     };
 
-    let mut args = preset_args(options);
-    args.push(source_path.clone());
-    args.push("-o".to_string());
-    args.push(resolved_output.display().to_string());
+    if matches!(options.conflict_policy, ConflictPolicy::Replace)
+        && !options.skip_larger_output
+        && resolved_output.exists()
+    {
+        fs::remove_file(&resolved_output).map_err(|error| format!("覆盖旧文件失败: {error}"))?;
+    }
 
-    let command = app
-        .shell()
-        .sidecar("binaries/cwebp")
-        .map_err(|error| format!("未找到 cwebp sidecar，请先准备平台二进制文件: {error}"))?;
+    let encode_output = if options.skip_larger_output {
+        build_temp_output_path(&resolved_output)
+    } else {
+        resolved_output.clone()
+    };
 
-    let output = command
-        .args(args)
-        .output()
-        .await
-        .map_err(|error| format!("执行 cwebp 失败: {error}"))?;
+    let encode_result = match options.output_format {
+        OutputFormat::Webp => encode_webp(app, &source_path, &encode_output, options).await,
+        OutputFormat::Png => encode_png(&source, &encode_output, options),
+        OutputFormat::Jpeg => encode_jpeg(&source, &encode_output, options),
+        OutputFormat::Avif => encode_avif(app, &source_path, &encode_output, options).await,
+    };
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if let Err(error) = encode_result {
+        let _ = fs::remove_file(&encode_output);
         return Ok(CompressItemResult {
             source_path,
             output_path: resolved_output.display().to_string(),
@@ -425,17 +444,36 @@ async fn compress_single(
             duration_ms: started.elapsed().as_millis(),
             ratio: None,
             status: ItemStatus::Failed,
-            error: Some(if stderr.is_empty() {
-                "cwebp 返回失败状态".to_string()
-            } else {
-                stderr
-            }),
+            error: Some(error),
         });
     }
 
-    let output_bytes = fs::metadata(&resolved_output)
+    let output_bytes = fs::metadata(&encode_output)
         .map_err(|error| format!("读取输出文件失败: {error}"))?
         .len();
+
+    if options.skip_larger_output && output_bytes >= source_bytes {
+        let _ = fs::remove_file(&encode_output);
+        return Ok(CompressItemResult {
+            source_path,
+            output_path: resolved_output.display().to_string(),
+            source_bytes,
+            output_bytes: Some(output_bytes),
+            duration_ms: started.elapsed().as_millis(),
+            ratio: Some(output_bytes as f64 / source_bytes as f64),
+            status: ItemStatus::Skipped,
+            error: Some("压缩后体积不小于原图，已丢弃输出".to_string()),
+        });
+    }
+
+    if encode_output != resolved_output {
+        if matches!(options.conflict_policy, ConflictPolicy::Replace) && resolved_output.exists() {
+            fs::remove_file(&resolved_output)
+                .map_err(|error| format!("覆盖旧文件失败: {error}"))?;
+        }
+        fs::rename(&encode_output, &resolved_output)
+            .map_err(|error| format!("写入输出文件失败: {error}"))?;
+    }
 
     Ok(CompressItemResult {
         source_path,
@@ -504,16 +542,193 @@ fn preset_args(options: &CompressionOptions) -> Vec<String> {
     args
 }
 
-fn build_output_path(input: &InputSource, source: &Path, suffix: &str) -> Result<PathBuf, String> {
+async fn encode_webp(
+    app: &AppHandle,
+    source_path: &str,
+    output_path: &Path,
+    options: &CompressionOptions,
+) -> Result<(), String> {
+    let mut args = preset_args(options);
+    args.push(source_path.to_string());
+    args.push("-o".to_string());
+    args.push(output_path.display().to_string());
+
+    let command = app
+        .shell()
+        .sidecar("cwebp")
+        .map_err(|error| format!("未找到 cwebp sidecar，请先准备平台二进制文件: {error}"))?;
+
+    let output = command
+        .args(args)
+        .output()
+        .await
+        .map_err(|error| format!("执行 cwebp 失败: {error}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(if stderr.is_empty() {
+        "cwebp 返回失败状态".to_string()
+    } else {
+        stderr
+    })
+}
+
+async fn encode_avif(
+    app: &AppHandle,
+    source_path: &str,
+    output_path: &Path,
+    options: &CompressionOptions,
+) -> Result<(), String> {
+    let quality = options.quality.unwrap_or(match options.preset {
+        CompressionPreset::Balanced => 78,
+        CompressionPreset::Quality => 90,
+        CompressionPreset::Size => 62,
+    });
+    let quantizer = map_quality_to_avif_quantizer(quality);
+    let speed = match options.preset {
+        CompressionPreset::Balanced => 6,
+        CompressionPreset::Quality => 4,
+        CompressionPreset::Size => 8,
+    };
+
+    let mut args = vec![
+        "--min".to_string(),
+        quantizer.to_string(),
+        "--max".to_string(),
+        quantizer.to_string(),
+        "--speed".to_string(),
+        speed.to_string(),
+        "-j".to_string(),
+        "all".to_string(),
+    ];
+
+    if !options.strip_metadata {
+        args.push("--exif".to_string());
+    }
+
+    args.push(source_path.to_string());
+    args.push(output_path.display().to_string());
+
+    let command = app
+        .shell()
+        .sidecar("avifenc")
+        .map_err(|error| format!("未找到 avifenc sidecar，请先准备平台二进制文件: {error}"))?;
+
+    let output = command
+        .args(args)
+        .output()
+        .await
+        .map_err(|error| format!("执行 avifenc 失败: {error}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(if stderr.is_empty() {
+        "avifenc 返回失败状态".to_string()
+    } else {
+        stderr
+    })
+}
+
+fn encode_png(
+    source: &Path,
+    output_path: &Path,
+    options: &CompressionOptions,
+) -> Result<(), String> {
+    let image = image::open(source).map_err(|error| format!("读取 PNG 源图失败: {error}"))?;
+    let rgba = image.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    let writer = BufWriter::new(
+        fs::File::create(output_path).map_err(|error| format!("创建输出文件失败: {error}"))?,
+    );
+    let encoder = PngEncoder::new_with_quality(
+        writer,
+        png_compression_type(options),
+        PngFilterType::Adaptive,
+    );
+
+    encoder
+        .write_image(rgba.as_raw(), width, height, ColorType::Rgba8.into())
+        .map_err(|error| format!("写入 PNG 输出失败: {error}"))
+}
+
+fn encode_jpeg(
+    source: &Path,
+    output_path: &Path,
+    options: &CompressionOptions,
+) -> Result<(), String> {
+    let image = image::open(source).map_err(|error| format!("读取 PNG 源图失败: {error}"))?;
+    let rgb = flatten_to_rgb(image);
+    let quality = options
+        .quality
+        .unwrap_or(match options.preset {
+            CompressionPreset::Balanced => 84,
+            CompressionPreset::Quality => 92,
+            CompressionPreset::Size => 76,
+        })
+        .clamp(1, 100);
+
+    let writer = BufWriter::new(
+        fs::File::create(output_path).map_err(|error| format!("创建输出文件失败: {error}"))?,
+    );
+    let mut encoder = JpegEncoder::new_with_quality(writer, quality);
+    encoder
+        .encode_image(&rgb)
+        .map_err(|error| format!("写入 JPEG 输出失败: {error}"))
+}
+
+fn flatten_to_rgb(image: DynamicImage) -> image::RgbImage {
+    let (width, height) = image.dimensions();
+    let rgba = image.to_rgba8();
+    let mut rgb = image::RgbImage::new(width, height);
+    for (x, y, pixel) in rgba.enumerate_pixels() {
+        let [r, g, b, a] = pixel.0;
+        if a == 255 {
+            rgb.put_pixel(x, y, image::Rgb([r, g, b]));
+            continue;
+        }
+        let alpha = a as u16;
+        let inv_alpha = 255u16.saturating_sub(alpha);
+        // JPEG 不支持透明，默认与白底混合。
+        let rr = ((r as u16 * alpha) + (255 * inv_alpha)) / 255;
+        let gg = ((g as u16 * alpha) + (255 * inv_alpha)) / 255;
+        let bb = ((b as u16 * alpha) + (255 * inv_alpha)) / 255;
+        rgb.put_pixel(x, y, image::Rgb([rr as u8, gg as u8, bb as u8]));
+    }
+    rgb
+}
+
+fn png_compression_type(options: &CompressionOptions) -> PngCompressionType {
+    if options.quality.is_some() {
+        return PngCompressionType::Best;
+    }
+    match options.preset {
+        CompressionPreset::Balanced => PngCompressionType::Default,
+        CompressionPreset::Quality => PngCompressionType::Best,
+        CompressionPreset::Size => PngCompressionType::Best,
+    }
+}
+
+fn build_output_path(
+    input: &InputSource,
+    source: &Path,
+    suffix: &str,
+    format: &OutputFormat,
+) -> Result<PathBuf, String> {
     let stem = source
         .file_stem()
         .and_then(|value| value.to_str())
         .ok_or_else(|| "无法解析源文件名".to_string())?;
 
-    let file_name = format!("{stem}{suffix}.webp");
+    let file_name = format!("{stem}{suffix}.{}", output_extension_from_format(format));
 
     match input {
-        InputSource::Folder { path } => {
+        InputSource::Folder { path, .. } => {
             let folder = PathBuf::from(path);
             let parent = folder
                 .parent()
@@ -546,22 +761,45 @@ fn build_output_path(input: &InputSource, source: &Path, suffix: &str) -> Result
     }
 }
 
+fn output_extension_from_format(format: &OutputFormat) -> &'static str {
+    match format {
+        OutputFormat::Webp => "webp",
+        OutputFormat::Png => "png",
+        OutputFormat::Jpeg => "jpg",
+        OutputFormat::Avif => "avif",
+    }
+}
+
+fn map_quality_to_avif_quantizer(quality: u8) -> u8 {
+    let clamped = quality.clamp(1, 100) as u32;
+    // avifenc quantizer: 0(最高质量) -> 63(最低质量)
+    (((100 - clamped) * 63) / 99) as u8
+}
+
 fn resolve_input_paths(input: &InputSource) -> Result<Vec<PathBuf>, String> {
     match input {
         InputSource::Files { paths } => Ok(paths.iter().map(PathBuf::from).collect()),
-        InputSource::Folder { path } => {
-            let entries = fs::read_dir(path).map_err(|error| format!("读取目录失败: {error}"))?;
+        InputSource::Folder { path, recursive } => {
             let mut files = Vec::new();
-            for entry in entries {
-                let entry = entry.map_err(|error| format!("遍历目录失败: {error}"))?;
-                let entry_path = entry.path();
-                if entry_path.is_file() {
-                    files.push(entry_path);
-                }
-            }
+            collect_files(Path::new(path), *recursive, &mut files)?;
             Ok(files)
         }
     }
+}
+
+fn collect_files(root: &Path, recursive: bool, files: &mut Vec<PathBuf>) -> Result<(), String> {
+    let entries = fs::read_dir(root).map_err(|error| format!("读取目录失败: {error}"))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("遍历目录失败: {error}"))?;
+        let entry_path = entry.path();
+        if entry_path.is_file() {
+            files.push(entry_path);
+        } else if recursive && entry_path.is_dir() {
+            collect_files(&entry_path, true, files)?;
+        }
+    }
+
+    Ok(())
 }
 
 fn is_png_path(path: &Path) -> bool {
@@ -594,6 +832,23 @@ fn uniquify_output_path(path: PathBuf) -> PathBuf {
     }
 
     parent.join(format!("{stem}_overflow.{extension}"))
+}
+
+fn build_temp_output_path(path: &Path) -> PathBuf {
+    let parent = path.parent().map(PathBuf::from).unwrap_or_default();
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("output");
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let ext = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("tmp");
+    parent.join(format!(".{stem}.supertools-{stamp}.tmp.{ext}"))
 }
 
 fn build_cancelled_result(source_path: String, source_bytes: u64) -> CompressItemResult {

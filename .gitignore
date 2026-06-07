@@ -6,19 +6,28 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+.codex-logs/
 
-node_modules
-dist
-dist-ssr
+# Dependencies and build output
+node_modules/
+dist/
+dist-ssr/
 *.local
-src-tauri/target
-src-tauri/gen
+*.tsbuildinfo
+src-tauri/target/
+src-tauri/gen/
+
+# Local sidecar binaries
+src-tauri/binaries/*
+!src-tauri/binaries/README.txt
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
+Thumbs.db
+Desktop.ini
 *.suo
 *.ntvs*
 *.njsproj

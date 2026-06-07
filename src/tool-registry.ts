@@ -1,8 +1,15 @@
-export type ToolId = 'png-compress' | 'svg-export'
+export type ToolId =
+  | 'png-compress'
+  | 'svg-export'
+  | 'pdf-images-to-pdf'
+  | 'pdf-to-images'
+  | 'pdf-merge'
+  | 'pdf-split'
+  | 'pdf-watermark'
 
 export type ToolMeta = {
   id: ToolId
-  category: 'image' | 'vector' | 'upcoming'
+  category: 'image' | 'vector' | 'pdf' | 'upcoming'
   glyph: string
   name: string
   summary: string
@@ -38,5 +45,65 @@ export const toolRegistry: ToolMeta[] = [
     statusTone: 'new',
     scopeLabel: '多端图标包',
     engineLabel: 'resvg + png/ico/icns',
+  },
+  {
+    id: 'pdf-images-to-pdf',
+    category: 'pdf',
+    glyph: 'I2P',
+    name: '图片转 PDF',
+    summary: '多张图片合成为一个 PDF。',
+    description: '适合把截图、扫描件、设计稿快速整理成 PDF 文档。',
+    statusLabel: '已上线',
+    statusTone: 'new',
+    scopeLabel: 'PDF',
+    engineLabel: 'Rust PDF writer',
+  },
+  {
+    id: 'pdf-to-images',
+    category: 'pdf',
+    glyph: 'P2I',
+    name: 'PDF 转图片',
+    summary: '把 PDF 页面导出为 PNG 或 JPG。',
+    description: '按页渲染 PDF，适合生成预览图、页面素材或归档图片。',
+    statusLabel: '已上线',
+    statusTone: 'new',
+    scopeLabel: 'PDF',
+    engineLabel: 'mutool',
+  },
+  {
+    id: 'pdf-merge',
+    category: 'pdf',
+    glyph: 'PDF',
+    name: 'PDF 合并',
+    summary: '多个 PDF 按顺序合并为一个文件。',
+    description: '支持选择多个 PDF，并按选择顺序合成为单个输出文件。',
+    statusLabel: '已上线',
+    statusTone: 'new',
+    scopeLabel: 'PDF',
+    engineLabel: 'mutool',
+  },
+  {
+    id: 'pdf-split',
+    category: 'pdf',
+    glyph: 'CUT',
+    name: 'PDF 拆分',
+    summary: '按页码范围或逐页拆分 PDF。',
+    description: '支持指定页码范围输出，也支持把 PDF 每页拆成独立文件。',
+    statusLabel: '已上线',
+    statusTone: 'new',
+    scopeLabel: 'PDF',
+    engineLabel: 'mutool',
+  },
+  {
+    id: 'pdf-watermark',
+    category: 'pdf',
+    glyph: 'WM',
+    name: 'PDF 加水印',
+    summary: '给 PDF 页面添加文本水印。',
+    description: '本地写入文本水印，适合内部流转、标记版本或添加简单声明。',
+    statusLabel: '已上线',
+    statusTone: 'new',
+    scopeLabel: 'PDF',
+    engineLabel: 'mutool + resvg',
   },
 ]

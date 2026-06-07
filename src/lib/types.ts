@@ -1,6 +1,7 @@
-export type OutputFormat = 'webp' | 'png' | 'avif'
+export type OutputFormat = 'webp' | 'png' | 'jpeg' | 'avif'
 export type SvgExportFormat = 'png' | 'jpg' | 'jpeg'
 export type IconPlatform = 'android' | 'ios' | 'flutter' | 'electron' | 'tauri'
+export type PdfImageFormat = 'png' | 'jpg'
 
 export type CompressionPreset = 'balanced' | 'quality' | 'size'
 
@@ -14,6 +15,7 @@ export type InputSource =
   | {
       kind: 'folder'
       path: string
+      recursive?: boolean
     }
 
 export type CompressionOptions = {
@@ -22,6 +24,7 @@ export type CompressionOptions = {
   quality?: number
   stripMetadata: boolean
   keepTransparentRgb: boolean
+  skipLargerOutput: boolean
   conflictPolicy: ConflictPolicy
   outputSuffix: string
   recursive: boolean
@@ -127,4 +130,42 @@ export type SvgIconSetResult = {
   totalBytes: number
   platforms: IconPlatform[]
   assets: IconAssetResult[]
+}
+
+export type PdfOperationResult = {
+  outputDir: string
+  outputPaths: string[]
+  message: string
+}
+
+export type ImagesToPdfRequest = {
+  imagePaths: string[]
+  outputPath: string
+}
+
+export type PdfToImagesRequest = {
+  pdfPath: string
+  outputDir: string
+  format: PdfImageFormat
+  dpi: number
+}
+
+export type MergePdfsRequest = {
+  pdfPaths: string[]
+  outputPath: string
+}
+
+export type SplitPdfRequest = {
+  pdfPath: string
+  outputDir: string
+  mode: 'range' | 'pages'
+  pageRanges: string
+}
+
+export type WatermarkPdfRequest = {
+  pdfPath: string
+  outputPath: string
+  text: string
+  fontSize: number
+  opacity: number
 }
